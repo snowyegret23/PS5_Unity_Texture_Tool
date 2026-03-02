@@ -189,3 +189,5 @@ _tmp_core_slice.txt
 /tools
 config.json
 AGENTS.md
+/release
+/.build_venv

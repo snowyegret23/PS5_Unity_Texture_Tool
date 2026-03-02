@@ -27,22 +27,25 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller Pillow TypeTreeGeneratorAPI fmod_toolkit archspec
-          pip install --upgrade UnityPy
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller flet-cli==0.81.0 Pillow TypeTreeGeneratorAPI fmod_toolkit archspec
+          python -m pip install --upgrade UnityPy flet-desktop==0.81.0
 
       - name: Build executable
         run: |
-          pyinstaller --onefile --name ps5_unity_texture_tool `
-            --collect-all UnityPy `
-            --collect-all TypeTreeGeneratorAPI `
-            --collect-all fmod_toolkit `
-            --collect-all archspec `
-            --collect-all texture2ddecoder `
-            --collect-all PIL `
-            --collect-all numpy `
-            --collect-all flet `
-            app.py
+          python -m flet_cli.cli pack app.py `
+            --yes `
+            --name ps5_unity_texture_tool `
+            --distpath dist `
+            --hidden-import UnityPy `
+            --hidden-import UnityPy.export `
+            --hidden-import UnityPy.helpers `
+            --hidden-import UnityPy.enums `
+            --hidden-import UnityPy.resources `
+            --hidden-import texture2ddecoder `
+            --pyinstaller-build-args=--collect-data=UnityPy `
+            --pyinstaller-build-args=--collect-data=fmod_toolkit `
+            --pyinstaller-build-args=--collect-data=archspec
 
       - name: Prepare release files
         run: |
@@ -53,7 +56,7 @@ jobs:
 
       - name: Create ZIP archive
         run: |
-          Compress-Archive -Path release\* -DestinationPath PS5_Unity_Texture_Tool_v${{ inputs.version }}.zip
+          Compress-Archive -Path release\* -DestinationPath PS5_Unity_Texture_Tool_v${{ inputs.version }}.zip -Force
 
       - name: Create tag
         run: |
