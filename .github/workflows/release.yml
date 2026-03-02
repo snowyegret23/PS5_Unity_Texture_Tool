@@ -28,12 +28,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller Pillow TypeTreeGeneratorAPI fmod_toolkit archspec
+          pip install --upgrade UnityPy
 
       - name: Build executable
         run: |
           pyinstaller --onefile --name ps5_unity_texture_tool `
             --collect-all UnityPy `
+            --collect-all TypeTreeGeneratorAPI `
+            --collect-all fmod_toolkit `
+            --collect-all archspec `
             --collect-all texture2ddecoder `
             --collect-all PIL `
             --collect-all numpy `
