@@ -179,3 +179,13 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+/.preview_cache
+*.bundle
+/_smoke_out
+_tmp_core_slice.txt
+/_tmp_namecheck
+/_tmp_roundtrip_multi_imgs
+/Docs
+/tools
+config.json
+AGENTS.md

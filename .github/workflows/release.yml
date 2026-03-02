@@ -1,0 +1,71 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "릴리즈 버전 (예: 1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        run: |
+          pyinstaller --onefile --name ps5_unity_texture_tool `
+            --collect-all UnityPy `
+            --collect-all texture2ddecoder `
+            --collect-all PIL `
+            --collect-all numpy `
+            --collect-all flet `
+            app.py
+
+      - name: Prepare release files
+        run: |
+          mkdir release
+          copy dist\ps5_unity_texture_tool.exe release\
+          copy README.md release\
+          copy LICENSE release\
+
+      - name: Create ZIP archive
+        run: |
+          Compress-Archive -Path release\* -DestinationPath PS5_Unity_Texture_Tool_v${{ inputs.version }}.zip
+
+      - name: Create tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag v${{ inputs.version }} ${{ github.sha }}
+          git push origin v${{ inputs.version }}
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: v${{ inputs.version }}
+          draft: true
+          files: |
+            PS5_Unity_Texture_Tool_v${{ inputs.version }}.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
