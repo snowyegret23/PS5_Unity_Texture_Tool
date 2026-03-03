@@ -486,6 +486,10 @@ class TextureBackend:
                 mode_img = mode_img.resize((width, height), Image.Resampling.LANCZOS)
                 variant = "normal"
         else:
+            # Keep preview/import symmetry: swizzle-off Alpha8 preview applies
+            # a fixed vertical normalization, so undo it here before storage.
+            if int(texture_format) == 1:
+                mode_img = ImageOps.flip(mode_img)
             if mode_img.width != width or mode_img.height != height:
                 mode_img = mode_img.resize((width, height), Image.Resampling.LANCZOS)
 
@@ -866,6 +870,9 @@ class TextureBackend:
             expected = width * height * int(bpe)
             data = usable[:expected]
             image = Image.frombytes(mode_map[int(bpe)], (width, height), data)
+            # Alpha8 linear payloads still need Unity-space vertical normalization.
+            if int(texture_format) == 1:
+                image = ImageOps.flip(image)
         image = _to_rgba_preview(image)
         if settings.swap_rb:
             image = core._ps5_swap_rb_image(image)

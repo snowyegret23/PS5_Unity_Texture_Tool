@@ -2854,11 +2854,11 @@ def _ps5_unswizzle_best_variant(
         and should_transpose
         and mask_x is None
         and mask_y is None
-        and width != height
         and _ps5_dimensions_supported(height, width, bytes_per_element)
     ):
-        # KR: 전치 bpe (예: Alpha8): (H,W)로 unswizzle.
-        # EN: Transposing bpe (e.g. Alpha8): unswizzle at (H,W).
+        # KR: 전치 bpe (예: Alpha8): 종횡비와 무관하게 (H,W)로 unswizzle 후 회전 후보로 취급.
+        # EN: Transposing bpe (e.g. Alpha8): always treat (H,W) unswizzle as the primary
+        #     candidate regardless of aspect ratio (including square textures).
         try:
             swapped = ps5_unswizzle_bytes(
                 clipped,
@@ -4788,7 +4788,9 @@ def replace_fonts_in_file(
     sdf_parse_failure_reasons: list[str] = []
 
     texture_replacements: dict[str, Any] = {}
+    texture_replacement_target_swizzle: dict[str, bool] = {}
     texture_replacement_metadata_size: dict[str, tuple[int, int]] = {}
+    texture_replacement_linear_source: dict[str, Image.Image] = {}
     material_replacements: dict[str, JsonDict] = {}
     modified = False
 
@@ -4976,6 +4978,16 @@ def replace_fonts_in_file(
                     asset_process_swizzle = parse_bool_flag(
                         assets.get("sdf_process_swizzle")
                     )
+                    atlas_linear_for_alpha8 = source_atlas
+                    if ps5_swizzle and source_swizzled:
+                        try:
+                            atlas_linear_for_alpha8 = apply_ps5_unswizzle_to_image(
+                                source_atlas,
+                                allow_axis_swap=True,
+                                roughness_guard=True,
+                            )
+                        except Exception:
+                            atlas_linear_for_alpha8 = source_atlas
                     target_swizzle_verdict: str | None = None
                     target_swizzle_source: str | None = None
                     target_is_swizzled: bool | None = None
@@ -5531,6 +5543,12 @@ def replace_fonts_in_file(
 
                     texture_key = f"{assets_name}|{m_AtlasTextures_PathID}"
                     texture_replacements[texture_key] = atlas_for_write
+                    texture_replacement_target_swizzle[texture_key] = bool(
+                        desired_swizzle_state
+                    )
+                    texture_replacement_linear_source[texture_key] = (
+                        atlas_linear_for_alpha8
+                    )
                     texture_replacement_metadata_size[texture_key] = (
                         atlas_metadata_width,
                         atlas_metadata_height,
@@ -5662,6 +5680,12 @@ def replace_fonts_in_file(
                         f"Texture replaced: {obj.peek_name()} (PathID: {obj.path_id})"
                     )
                 replacement_image = texture_replacements[replacement_key]
+                target_swizzled_state = texture_replacement_target_swizzle.get(
+                    replacement_key
+                )
+                replacement_linear_source = texture_replacement_linear_source.get(
+                    replacement_key
+                )
                 metadata_w, metadata_h = texture_replacement_metadata_size.get(
                     replacement_key, (0, 0)
                 )
@@ -5682,7 +5706,34 @@ def replace_fonts_in_file(
                     and isinstance(replacement_image, Image.Image)
                 ):
                     try:
-                        alpha_raw, aw, ah = _image_to_alpha8_bytes(replacement_image)
+                        alpha_source = (
+                            replacement_linear_source
+                            if isinstance(replacement_linear_source, Image.Image)
+                            else replacement_image
+                        )
+                        # KR: Alpha8은 반드시 bpe=1 경로로 인코딩해야 합니다.
+                        # KR: RGBA 기준 swizzle 후 알파만 추출하면 바이트 순서가 깨질 수 있습니다.
+                        # EN: Alpha8 must be encoded via bpe=1 path.
+                        # EN: Swizzling as RGBA then extracting alpha can corrupt byte order.
+                        if target_swizzled_state is True:
+                            alpha_linear, aw, ah = _image_to_alpha8_bytes(alpha_source)
+                            alpha_linear_img = Image.frombytes(
+                                "L", (int(aw), int(ah)), alpha_linear
+                            )
+                            alpha_swizzled_img = apply_ps5_swizzle_to_image(
+                                alpha_linear_img
+                            )
+                            alpha_raw, aw, ah = _image_to_alpha8_bytes(
+                                alpha_swizzled_img
+                            )
+                        elif target_swizzled_state is False:
+                            # KR: linear(비-swizzled) 타겟은 Unity 저장 좌표계 보정을 위해 상하 반전을 적용합니다.
+                            # EN: Linear (non-swizzled) targets are vertically flipped for Unity storage coordinates.
+                            alpha_raw, aw, ah = _image_to_alpha8_bytes(
+                                ImageOps.flip(alpha_source)
+                            )
+                        else:
+                            alpha_raw, aw, ah = _image_to_alpha8_bytes(alpha_source)
                         parse_dict.m_Width = int(metadata_w if metadata_w > 0 else aw)
                         parse_dict.m_Height = int(metadata_h if metadata_h > 0 else ah)
                         if hasattr(parse_dict, "m_CompleteImageSize"):
@@ -5699,16 +5750,35 @@ def replace_fonts_in_file(
                         applied_raw_alpha8 = True
                         _log_debug(
                             f"[replace_texture] file={fn_without_path} assets={assets_name} path_id={obj.path_id} "
-                            f"action=alpha8_raw_injection raw_size={len(alpha_raw)} width={aw} height={ah}"
+                            f"action=alpha8_raw_injection target_swizzled={target_swizzled_state} "
+                            f"raw_size={len(alpha_raw)} width={aw} height={ah}"
                         )
                         if lang == "ko":
-                            _log_console(
-                                "  Alpha8 raw 주입 적용: swizzle 바이트를 image_data에 직접 기록합니다."
-                            )
+                            if target_swizzled_state is True:
+                                _log_console(
+                                    "  Alpha8 raw 주입 적용: swizzled 바이트를 image_data에 직접 기록합니다."
+                                )
+                            elif target_swizzled_state is False:
+                                _log_console(
+                                    "  Alpha8 raw 주입 적용: linear 바이트(상하 반전 보정)를 image_data에 직접 기록합니다."
+                                )
+                            else:
+                                _log_console(
+                                    "  Alpha8 raw 주입 적용: 판정 불명(inconclusive) 상태로 image_data에 직접 기록합니다."
+                                )
                         else:
-                            _log_console(
-                                "  Applied Alpha8 raw injection: writing swizzled bytes directly to image_data."
-                            )
+                            if target_swizzled_state is True:
+                                _log_console(
+                                    "  Applied Alpha8 raw injection: writing swizzled bytes directly to image_data."
+                                )
+                            elif target_swizzled_state is False:
+                                _log_console(
+                                    "  Applied Alpha8 raw injection: writing linear bytes (with vertical-flip compensation) to image_data."
+                                )
+                            else:
+                                _log_console(
+                                    "  Applied Alpha8 raw injection: writing bytes directly to image_data (target state inconclusive)."
+                                )
                     except Exception as raw_inject_error:
                         if lang == "ko":
                             _log_console(
