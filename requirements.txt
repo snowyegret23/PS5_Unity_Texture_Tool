@@ -1,5 +1,5 @@
 flet==0.81.0
-flet-desktop==0.81.0
+flet-desktop==0.86.5
 UnityPy>=1.20.28
 Pillow>=10.4.0
 numpy>=1.26.4
